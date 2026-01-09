@@ -1,0 +1,1645 @@
+1) split.py
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+# Load the preprocessed dataset (adjust path if needed)
+df = pd.read_csv('Preprocessed_DATASET.csv')
+
+# Display basic info (optional, for verification)
+print(df.head())
+print(df.info())
+print(df['Is_Fraud'].value_counts())  # Check class balance
+
+# Separate features (X) and target (y)
+# Drop 'Transaction_Time' if not using it (it's a string; could extract features like hour/weekday)
+X = df.drop(['Is_Fraud', 'Transaction_Time'], axis=1)  # Features (exclude target and timestamp)
+y = df['Is_Fraud']  # Target
+
+# Split into train (80%) and test (20%) sets
+# Use stratify=y to maintain class balance in splits (important for imbalanced data)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# Verify shapes
+print(f"Train set: {X_train.shape} features, {y_train.shape} labels")
+print(f"Test set: {X_test.shape} features, {y_test.shape} labels")
+
+# Optional: Save splits to CSV
+X_train.to_csv('train_features.csv', index=False)
+y_train.to_csv('train_labels.csv', index=False)
+X_test.to_csv('test_features.csv', index=False)
+y_test.to_csv('test_labels.csv', index=False)
+
+
+2) train_random_forest
+
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import confusion_matrix, classification_report
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pickle
+
+# Load the training and testing data
+X_train = pd.read_csv('train_features.csv')
+y_train = pd.read_csv('train_labels.csv')
+X_test = pd.read_csv('test_features.csv')
+y_test = pd.read_csv('test_labels.csv')
+
+# Initialize the Random Forest model with adjusted parameters to reduce false negatives
+# Increase n_estimators and adjust class_weight to penalize false negatives more
+rf_model = RandomForestClassifier(n_estimators=200, random_state=42, class_weight={0: 1, 1: 5}, max_depth=10)
+
+# Train the model
+rf_model.fit(X_train, y_train.values.ravel())
+
+# Make predictions on the test set
+y_pred = rf_model.predict(X_test)
+
+# Print the confusion matrix and classification report
+print("Confusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+# Plot and save confusion matrix (count)
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Confusion Matrix (Count)')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.savefig('confusion_matrix_count.png')
+
+# Plot and save confusion matrix (percentage)
+cm_percentage = cm / cm.sum(axis=1).reshape(-1, 1) * 100
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm_percentage, annot=True, fmt='.2f', cmap='Blues')
+plt.title('Confusion Matrix (Percentage)')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.savefig('confusion_matrix_percentage.png')
+
+# Save the model
+with open('random_forest_model.pkl', 'wb') as f:
+    pickle.dump(rf_model, f)
+
+print("Model saved as random_forest_model.pkl")
+print("Confusion matrix images saved as confusion_matrix_count.png and confusion_matrix_percentage.png")
+
+
+
+3)predict.py
+
+
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+import pickle
+import numpy as np
+
+# Load the raw dataset to fit the preprocessors
+df_raw = pd.read_csv('DATASET.csv')
+
+# Categorical columns to encode
+categorical_cols = [
+    'Transaction_ID', 'User_ID', 'Device_Type', 'Location', 
+    'Merchant_Category', 'IP_Address', 'Card_Type', 'Authentication_Method'
+]
+
+# Fit LabelEncoders
+label_encoders = {}
+for col in categorical_cols:
+    le = LabelEncoder()
+    df_raw[col] = le.fit_transform(df_raw[col].astype(str))
+    label_encoders[col] = le
+
+# Numerical columns to scale
+numerical_cols = [
+    'Transaction_Amount', 'Account_Balance', 'Previous_Transaction_Amount', 
+    'Daily_transaction_count', 'Avg_Transaction_Amount_Per_Day', 
+    'Avg_Transactions_amount_7Day', 'Failed_Transaction_Count_7d', 
+    'Card_Age_Months', 'Transaction_Distance_KM'
+]
+
+# Fit MinMaxScalers
+scalers = {}
+for col in numerical_cols:
+    scaler = MinMaxScaler()
+    df_raw[[col]] = scaler.fit_transform(df_raw[[col]])
+    scalers[col] = scaler
+
+# === SAVE ENCODERS AND SCALERS ===
+with open('label_encoders.pkl', 'wb') as f:
+    pickle.dump(label_encoders, f)
+
+with open('scalers.pkl', 'wb') as f:
+    pickle.dump(scalers, f)
+
+print("Saved label_encoders.pkl and scalers.pkl")
+
+# Binary columns (no processing needed, but ensure they are 0/1)
+binary_cols = ['IP_Address_Flagged', 'Is_Weekend']
+
+# Load the trained model
+with open('random_forest_model.pkl', 'rb') as f:
+    model = pickle.load(f)
+
+# Load one of the feature files to get the exact column order for prediction
+X_train = pd.read_csv('train_features.csv')
+feature_columns = X_train.columns.tolist()
+
+# Function to preprocess new input
+def preprocess_new_data(new_data_dict):
+    df_new = pd.DataFrame([new_data_dict])
+    
+    # Encode categorical columns, handle unknown with -1
+    for col in categorical_cols:
+        try:
+            df_new[col] = label_encoders[col].transform(df_new[col].astype(str))
+        except ValueError:
+            df_new[col] = -1  # Unknown category
+    
+    # Scale numerical columns
+    for col in numerical_cols:
+        if col in df_new.columns:
+            df_new[[col]] = scalers[col].transform(df_new[[col]])
+    
+    # Ensure binary columns are 0 or 1
+    for col in binary_cols:
+        if col in df_new.columns:
+            df_new[col] = df_new[col].clip(0, 1)
+    
+    # Drop Transaction_Time if present
+    if 'Transaction_Time' in df_new.columns:
+        df_new = df_new.drop(['Transaction_Time'], axis=1)
+    
+    # Reorder columns to match training features
+    df_new = df_new.reindex(columns=feature_columns, fill_value=0)
+    
+    return df_new
+
+# === Manual Input Prediction ===
+print("\nEnter the transaction details manually (raw values):")
+
+transaction_id = input("Transaction_ID (e.g., T00001): ")
+user_id = input("User_ID (e.g., U695651): ")
+transaction_amount = float(input("Transaction_Amount (e.g., 29445.32): "))
+transaction_time = input("Transaction_Time (e.g., 26-05-2025 02:24): ")  # Will be dropped
+account_balance = float(input("Account_Balance (e.g., 194165.05): "))
+device_type = input("Device_Type (e.g., Tablet/Mobile/Desktop): ")
+location = input("Location (e.g., Pimpri-Chinchwad): ")
+merchant_category = input("Merchant_Category (e.g., Jewellery): ")
+ip_address = input("IP_Address (e.g., 117.108.194.20): ")
+ip_address_flagged = int(input("IP_Address_Flagged (0 or 1): "))
+previous_transaction_amount = float(input("Previous_Transaction_Amount (e.g., 13852.48): "))
+daily_transaction_count = int(input("Daily_transaction_count (e.g., 3): "))
+avg_transaction_amount_per_day = float(input("Avg_Transaction_Amount_Per_Day (e.g., 43505.82): "))
+avg_transactions_amount_7day = float(input("Avg_Transactions_amount_7Day (e.g., 56390.51): "))
+failed_transaction_count_7d = int(input("Failed_Transaction_Count_7d (e.g., 1): "))
+card_type = input("Card_Type (e.g., Credit/Debit): ")
+card_age_months = int(input("Card_Age_Months (e.g., 8): "))
+transaction_distance_km = float(input("Transaction_Distance_KM (e.g., 25.12): "))
+authentication_method = input("Authentication_Method (e.g., PIN/OTP): ")
+is_weekend = int(input("Is_Weekend (0 or 1): "))
+
+# Create dict with inputs
+new_data_dict = {
+    'Transaction_ID': transaction_id,
+    'User_ID': user_id,
+    'Transaction_Amount': transaction_amount,
+    'Transaction_Time': transaction_time,
+    'Account_Balance': account_balance,
+    'Device_Type': device_type,
+    'Location': location,
+    'Merchant_Category': merchant_category,
+    'IP_Address': ip_address,
+    'IP_Address_Flagged': ip_address_flagged,
+    'Previous_Transaction_Amount': previous_transaction_amount,
+    'Daily_transaction_count': daily_transaction_count,
+    'Avg_Transaction_Amount_Per_Day': avg_transaction_amount_per_day,
+    'Avg_Transactions_amount_7Day': avg_transactions_amount_7day,
+    'Failed_Transaction_Count_7d': failed_transaction_count_7d,
+    'Card_Type': card_type,
+    'Card_Age_Months': card_age_months,
+    'Transaction_Distance_KM': transaction_distance_km,
+    'Authentication_Method': authentication_method,
+    'Is_Weekend': is_weekend
+}
+
+# Preprocess the new data
+df_new_preprocessed = preprocess_new_data(new_data_dict)
+
+# Make prediction
+prediction = model.predict(df_new_preprocessed)[0]
+probability = model.predict_proba(df_new_preprocessed)[0][1]  # Probability of fraud (class 1)
+
+# Output the result
+print("\n================ Prediction Result ================")
+if prediction == 1:
+    print(f"FRAUD DETECTED! (Risk Score: {probability*100:.2f}%)")
+else:
+    print(f"NORMAL TRANSACTION (Fraud Probability: {probability*100:.2f}%)")
+
+# Optional: Test accuracy on test set
+"""
+X_test = pd.read_csv('test_features.csv')
+y_test = pd.read_csv('test_labels.csv')
+y_pred_test = model.predict(X_test)
+from sklearn.metrics import accuracy_score
+print("Model accuracy on test set:", accuracy_score(y_test, y_pred_test))
+"""
+
+
+4)generate_user_to_mongo.py
+
+
+// app.js - frontend logic (Dashboard selects -> Transfer)
+const API_ROOT = "http://127.0.0.1:5000/api";
+function id(n){return document.getElementById(n);}
+const toastEl = id("toast");
+function showToast(msg, ttl=4000, cls=""){ toastEl.textContent = msg; toastEl.className="toast"; if(cls) toastEl.classList.add(cls); toastEl.classList.remove("hidden"); if(ttl>0) setTimeout(()=>toastEl.classList.add("hidden"), ttl); }
+function hideToast(){ toastEl.classList.add("hidden"); }
+
+// LOGIN page handlers (index.html expected)
+if (id("btn_login")){
+  id("btn_login").onclick = async ()=>{
+    const user_id = id("login_user_id").value.trim();
+    const password = id("login_password").value;
+    if(!user_id||!password){ showToast("Enter credentials",2000); return; }
+    const res = await fetch(API_ROOT + "/login", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({user_id, password})
+    });
+    const j = await res.json();
+    if(!j.ok){ showToast(j.msg,3000); return; }
+    localStorage.setItem("session_token", j.data.token);
+    window.location.href = "/dashboard.html";
+  };
+  // forgot password UI (unchanged)
+  id("forgot_link").onclick = (e)=>{ e.preventDefault(); id("overlay").classList.remove("hidden"); showStep(1); };
+  function showStep(n){
+    id("forgot_step1").classList.toggle("hidden", n!==1);
+    id("forgot_step2").classList.toggle("hidden", n!==2);
+    id("forgot_step3").classList.toggle("hidden", n!==3);
+  }
+  ["back_to_login","back_to_login2","back_to_login3"].forEach(x=>{ if(id(x)) id(x).onclick=()=>{ id("overlay").classList.add("hidden"); hideToast(); } });
+  if(id("btn_request_otp")) id("btn_request_otp").onclick = async ()=>{
+    const u = id("fp_user_id").value.trim(); if(!u){ showToast("Enter User ID",2000); return; }
+    const res = await fetch(API_ROOT + "/request-otp", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({user_id:u})});
+    const j = await res.json();
+    if(!j.ok){ showToast(j.msg,3000); return; }
+    showStep(2); showToast("OTP (demo): "+j.otp, 0, "otp"); localStorage.setItem("reset_user", u);
+  };
+  if(id("btn_verify_otp")) id("btn_verify_otp").onclick = async ()=>{
+    const u = localStorage.getItem("reset_user"), otp = id("input_otp").value.trim(); if(!u||!otp){ showToast("Enter OTP",2000); return; }
+    const res = await fetch(API_ROOT + "/verify-otp", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({user_id:u, otp})});
+    const j = await res.json(); if(!j.ok){ showToast(j.msg,3000); return; } hideToast(); showStep(3);
+  };
+  if(id("btn_reset_password")) id("btn_reset_password").onclick = async ()=>{
+    const u = localStorage.getItem("reset_user"), p1=id("new_password").value, p2=id("confirm_password").value;
+    if(!p1||p1!==p2){ showToast("Passwords must match",2000); return; }
+    const res = await fetch(API_ROOT + "/reset-password", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({user_id:u, new_password:p1})});
+    const j = await res.json(); if(!j.ok){ showToast(j.msg,3000); return; }
+    showToast("Password updated. Login with new password.",3000); id("overlay").classList.add("hidden");
+  };
+}
+
+// DASHBOARD pages
+if (window.location.pathname.endsWith("dashboard.html")){
+  const token = localStorage.getItem("session_token");
+  if(!token){ window.location.href="/"; }
+
+  // nav switching
+  document.querySelectorAll(".sidebar .nav").forEach(el=>{
+    el.addEventListener("click", (e)=>{
+      document.querySelectorAll(".sidebar .nav").forEach(x=>x.classList.remove("active"));
+      e.currentTarget.classList.add("active");
+      const p = e.currentTarget.getAttribute("data-page");
+      document.querySelectorAll(".page").forEach(x=>x.classList.add("hidden"));
+      document.getElementById("page_"+p).classList.remove("hidden");
+      if(p==="overview") loadOverview();
+      if(p==="accounts") loadAccounts();
+      if(p==="transfer") loadTransfer();
+    });
+  });
+
+  id("btn_logout").onclick = async ()=>{
+    await fetch(API_ROOT + "/logout", {method:"POST", headers:{"Authorization": token}});
+    localStorage.removeItem("session_token"); window.location.href="/";
+  };
+
+  id("btn_view_accounts")?.addEventListener("click", ()=>document.querySelector('[data-page="accounts"]').click());
+  id("go_transfer")?.addEventListener("click", ()=>document.querySelector('[data-page="transfer"]').click());
+
+  loadOverview(); refreshTransactions(); loadAccounts();
+
+  async function loadOverview(){
+    const res = await fetch(API_ROOT + "/dashboard", {headers:{"Authorization": token}});
+    const j = await res.json(); if(!j.ok){ showToast("Session expired",2000); localStorage.removeItem("session_token"); window.location.href="/"; return; }
+    const d = j.data;
+    id("welcome_line").textContent = `Welcome Back, ${d.name || d.User_ID}!`;
+    id("user_location").textContent = "Location: " + (d.location||"-");
+    id("user_phone").textContent = "Phone: " + (d.phone_number||"-");
+    id("total_balance").textContent = "₹" + ((d.account_summary.Total_Balance||0).toFixed(2));
+    id("inflow").textContent = "₹" + ((d.account_summary.Spend_Analysis||{}).Inflow||0).toFixed(2);
+    id("outflow").textContent = "₹" + ((d.account_summary.Spend_Analysis||{}).Outflow||0).toFixed(2);
+
+    // populate location select with allowed locations and set default to keep current
+    const sel = id("select_location"); sel.innerHTML = "<option>-- keep current --</option>";
+    (d.allowed_locations||[]).forEach(loc=>{ const opt=document.createElement("option"); opt.value=loc; opt.textContent=loc; sel.appendChild(opt);});
+
+    // ensure current device/ip are visible in selects
+    if(d.current_device){
+      const sdev = id("select_device");
+      if([...sdev.options].every(o=>o.value !== d.current_device)){
+        const opt = document.createElement("option"); opt.value = d.current_device; opt.textContent = d.current_device;
+        sdev.appendChild(opt);
+      }
+    }
+    if(d.current_ip){
+      const sip = id("select_ip");
+      if([...sip.options].every(o=>o.value !== d.current_ip)){
+        const opt = document.createElement("option"); opt.value = d.current_ip; opt.textContent = d.current_ip;
+        sip.appendChild(opt);
+      }
+    }
+
+    // recent transactions (overview)
+    id("recent_transactions").innerHTML = "";
+    (d.recent_transactions||[]).slice(0,6).forEach(tx=>{
+      const li = document.createElement("li");
+      const time = tx.Transaction_Time || tx.time || "";
+      const amt = tx.Transaction_Amount || tx.amount || 0;
+      const remark = tx.remark || tx.Merchant_Category || tx.type || "";
+      li.innerHTML = `<div class="recent-item"><div><strong>${remark}</strong><div class="recent-meta">${tx.Location||''} • ${time}</div></div><div style="text-align:right"><div style="color:${amt<0?'#e65555':'#0a8e42'}">${amt<0?('₹'+Math.abs(amt).toFixed(2)):('₹'+(amt).toFixed(2))}</div></div></div>`;
+      id("recent_transactions").appendChild(li);
+    });
+
+    hideFraudBanner(); id("top-user").textContent = `Call Us: +91 98765 | Welcome, ${d.name || d.User_ID}`;
+  }
+
+  async function loadAccounts(){
+    const res = await fetch(API_ROOT + "/dashboard", {headers:{"Authorization": token}});
+    const j = await res.json(); if(!j.ok){ showToast("Session expired",2000); localStorage.removeItem("session_token"); window.location.href="/"; return; }
+    const d = j.data;
+    id("user_short").textContent = (" " + d.User_ID).slice(0,10);
+    id("savings_balance").textContent = "₹" + (d.account_summary.Total_Balance||0).toFixed(2);
+    id("balance_text").textContent = "₹" + (d.account_summary.Total_Balance||0).toFixed(2);
+    id("available_spend").textContent = "₹" + (d.account_summary.Total_Balance||0).toFixed(2);
+    id("card_last4").textContent = (d.account_summary.Card_Number || "************5651").slice(-4);
+    id("card_age").textContent = d.account_summary.Card_Age_Months || 0;
+    const list = id("recent_transactions_accounts"); if(list) list.innerHTML = "";
+    (d.recent_transactions||[]).slice(0,6).forEach(tx=>{
+      if(!list) return;
+      const li = document.createElement("li");
+      const amt = tx.Transaction_Amount || tx.amount || 0;
+      li.innerHTML = `<div style="display:flex;justify-content:space-between"><div><strong>${tx.Merchant_Category||tx.type}</strong><div style="font-size:12px;color:#666">${tx.Transaction_Time||tx.time}</div></div><div style="color:${amt<0?'#e65555':'#0a8e42'}">${amt<0?('₹'+Math.abs(amt).toFixed(2)):(amt>0?('₹'+amt.toFixed(2)):'')}</div></div>`;
+      list.appendChild(li);
+    });
+  }
+
+  async function loadTransfer(){
+    id("beneficiary").value = ""; id("txn_id").value = ""; id("amount").value = ""; id("remarks").value = "";
+    id("transfer_otp_input").value=""; id("transfer_secret_input").value=""; id("transfer_secret_input").style.display="none";
+    id("transfer_verify").classList.add("hidden"); id("transfer_result").textContent=""; hideFraudBanner();
+  }
+
+  function showFraudBanner(serverAlerts){
+    const banner = id("fraud_banner"); if(!banner) return;
+    banner.classList.remove("hidden");
+    // serverAlerts expected: {risk_score:0.95, location_for_message: "..."}
+    const pct = Math.round((serverAlerts && serverAlerts.risk_score || 0) * 100);
+    id("fraud_msg").textContent = `⚠️ AI flagged this transaction as suspicious (RISK SCORE: ${pct}% ).`;
+    const loc = serverAlerts && serverAlerts.location_for_message ? serverAlerts.location_for_message : "-";
+    id("fraud_details").textContent = `Unknown device & Unknown IP address at location ${loc} — Transaction not possible.`;
+  }
+  function hideFraudBanner(){ const b=id("fraud_banner"); if(b) b.classList.add("hidden"); }
+
+  // Initiate transfer: send selected dashboard values
+  id("btn_initiate").onclick = async ()=>{
+    const beneficiary = id("beneficiary").value.trim();
+    const txn_id = id("txn_id").value.trim();
+    const amount = id("amount").value.trim();
+    const remarks = id("remarks").value.trim();
+    if(!beneficiary || !amount){ showToast("Enter beneficiary and amount",3000); return; }
+
+    // read dashboard selections
+    const override_location = id("select_location") ? id("select_location").value : "-- keep current --";
+    const override_time = id("manual_dt") ? id("manual_dt").value.trim() : "";
+    const device_choice = id("select_device") ? id("select_device").value : "-- keep current --";
+    const ip_choice = id("select_ip") ? id("select_ip").value : "-- keep current --";
+
+    const res = await fetch(API_ROOT + "/initiate-transfer", {
+      method:"POST",
+      headers: {"Content-Type":"application/json", "Authorization": token},
+      body: JSON.stringify({beneficiary, txn_id, amount, remarks, override_location, override_time, device_choice, ip_choice})
+    });
+    const j = await res.json();
+    if(!j.ok){ showToast(j.msg || "Error",4000); return; }
+
+    // show OTP toast and reveal verify area; DO NOT show fraud banner yet (we show banner after confirm only)
+    showToast("Transfer OTP (demo): " + j.transfer_otp, j.ttl_seconds*1000, "otp");
+    setTimeout(()=> hideToast(), j.ttl_seconds*1000);
+    id("transfer_verify").classList.remove("hidden");
+    id("transfer_result").textContent = "";
+    id("transfer_secret_input").style.display = j.require_secret_key ? "block" : "none";
+  };
+
+  // Confirm transfer: show fraud banner if blocked
+  id("btn_confirm_transfer").onclick = async ()=>{
+    const otp = id("transfer_otp_input").value.trim();
+    const secret = id("transfer_secret_input").value.trim();
+    if(!otp){ showToast("Enter OTP",3000); return; }
+    const res = await fetch(API_ROOT + "/confirm-transfer", {
+      method:"POST", headers: {"Content-Type":"application/json","Authorization": token},
+      body: JSON.stringify({otp, secret_key: secret})
+    });
+    const j = await res.json();
+    if(!j.ok){
+      // show fraud banner (backend sends 'fraud_alerts')
+      if(j.fraud_alerts) showFraudBanner(j.fraud_alerts);
+      id("transfer_result").textContent = j.msg || "Transfer blocked";
+      id("transfer_result").classList.remove("transfer-success");
+      id("transfer_result").classList.add("transfer-blocked");
+      await refreshTransactions(); loadOverview(); loadAccounts();
+      return;
+    }
+    // success
+    hideFraudBanner();
+    showToast("Transfer successful",3000);
+    const remark = j.txn.remark || "Transfer";
+    const amt = Math.abs(j.txn.Transaction_Amount || 0).toFixed(2);
+    const loc = j.txn.Location || "";
+    const timing = j.txn.Transaction_Time || j.txn.time || "";
+    id("transfer_result").innerHTML = `<strong>${remark}</strong> — ₹${amt} SUCCESS<br/><span class="recent-meta">${loc} • ${timing}</span>`;
+    id("transfer_result").classList.remove("transfer-blocked");
+    id("transfer_result").classList.add("transfer-success");
+    await refreshTransactions(); loadOverview(); loadAccounts();
+  };
+
+  // Recent transactions list (transfer page)
+  async function refreshTransactions(){
+    const res = await fetch(API_ROOT + "/dashboard", {headers:{"Authorization": token}});
+    const j = await res.json(); if(!j.ok) return;
+    const list = id("recent_transactions_transfer"); if(list) list.innerHTML = "";
+    (j.data.recent_transactions || []).slice(0,8).forEach(tx=>{
+      if(!list) return;
+      const li = document.createElement("li");
+      const amt = tx.Transaction_Amount || tx.amount || 0;
+      const remark = tx.remark || tx.Merchant_Category || tx.type || 'Transfer';
+      const time = tx.Transaction_Time || tx.time || '';
+      const location = tx.Location || '';
+      const rightText = `<div style="color:#0a8e42">₹${Math.abs(amt).toFixed(2)} SUCCESS</div>`;
+      li.innerHTML = `<div style="display:flex;justify-content:space-between"><div><strong>${remark}</strong><div style="font-size:12px;color:#666">${location} • ${time}</div></div><div>${rightText}</div></div>`;
+      list.appendChild(li);
+    });
+  }
+}
+
+
+4)app.py
+
+#!/usr/bin/env python3
+"""
+Updated backend with exact rule set per user's specification.
+- Loads optional model pickles if present (random_forest_model.pkl, label_encoders.pkl, scalers.pkl).
+- Applies deterministic rule-based fraud probabilities per cases provided.
+- If model exists, final_score = max(rule_score, model_score) (conservative).
+"""
+import os, uuid, hashlib, random, string
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+from pymongo import MongoClient
+import pickle
+import pandas as pd
+
+# CONFIG
+MONGO_URI = "mongodb://localhost:27017/"
+DB_NAME = "fraud_detection_db"
+USERS_COL = "users"
+RESET_OTP_TTL_SECONDS = 10
+TRANSFER_OTP_TTL_SECONDS = 20
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend")
+FRONTEND_DIR = os.path.abspath(FRONTEND_DIR)
+
+app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="/")
+CORS(app)
+
+client = MongoClient(MONGO_URI)
+db = client[DB_NAME]
+users = db[USERS_COL]
+
+ALLOWED_LOCATIONS = [
+    "Pimpri-Chinchwad","Hyderabad","Ahmedabad","Bengaluru","Bhopal","Chennai",
+    "Delhi","Indore","Kanpur","Kolkata","Lucknow","Mumbai","Nagpur","Surat",
+    "Vadodara","Visakhapatnam","Patna","Jaipur","Thane","Pune"
+]
+
+# HELPERS
+def sha256_hash(s: str) -> str:
+    return hashlib.sha256(s.encode()).hexdigest()
+
+def gen_otp(length=6):
+    return "".join(random.choices(string.digits, k=length))
+
+def create_session_token():
+    return str(uuid.uuid4())
+
+def find_user(user_id):
+    return users.find_one({"User_ID": user_id})
+
+# MODEL LOADING (optional)
+def safe_load_pickle(path):
+    if os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"[WARN] Failed to load {path}: {e}")
+    return None
+
+fraud_model = safe_load_pickle(os.path.join(BASE_DIR, "random_forest_model.pkl"))
+label_encoders = safe_load_pickle(os.path.join(BASE_DIR, "label_encoders.pkl")) or {}
+scalers = safe_load_pickle(os.path.join(BASE_DIR, "scalers.pkl")) or {}
+
+def preprocess_new_data(txn_dict: dict) -> pd.DataFrame:
+    df = pd.DataFrame([txn_dict])
+    for col, enc in label_encoders.items():
+        if col in df.columns:
+            vals = df[col].astype(str).tolist()
+            classes = getattr(enc, "classes_", [])
+            table = {c: i for i, c in enumerate(classes)}
+            df[col] = [table.get(v, -1) for v in vals]
+    for col, sc in scalers.items():
+        if col in df.columns:
+            try:
+                df[[col]] = sc.transform(df[[col]])
+            except Exception:
+                pass
+    if "Transaction_Time" in df.columns:
+        df = df.drop(["Transaction_Time"], axis=1)
+    return df
+
+# STATIC PAGES
+@app.route("/")
+def index():
+    return send_from_directory(FRONTEND_DIR, "index.html")
+
+@app.route("/dashboard.html")
+def dashboard_html():
+    return send_from_directory(FRONTEND_DIR, "dashboard.html")
+
+# AUTH
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    data = request.json or {}
+    user_id = data.get("user_id", "").strip()
+    password = data.get("password", "")
+    if not user_id or not password:
+        return jsonify({"ok": False, "msg": "Provide user_id and password"}), 400
+    u = find_user(user_id)
+    if not u:
+        return jsonify({"ok": False, "msg": "User not found"}), 404
+    if u.get("password_hash") != sha256_hash(password):
+        return jsonify({"ok": False, "msg": "Invalid credentials"}), 401
+
+    token = create_session_token()
+    expiry = datetime.utcnow() + timedelta(hours=2)
+    users.update_one({"User_ID": user_id}, {"$set": {"session_token": token, "session_expiry": expiry}})
+
+    payload = {
+        "token": token,
+        "User_ID": u["User_ID"],
+        "name": u.get("name"),
+        "phone_number": u.get("phone_number"),
+        "location": u.get("location"),
+        "account_summary": u.get("account_summary", {}),
+        "recent_transactions": u.get("recent_transactions", [])
+    }
+
+    return jsonify({"ok": True, "data": payload})
+
+# SESSION VALIDATION
+def validate_session(token):
+    if not token:
+        return None
+    u = users.find_one({"session_token": token})
+    if not u:
+        return None
+    if "session_expiry" in u and u["session_expiry"] < datetime.utcnow():
+        users.update_one({"_id": u["_id"]}, {"$unset": {"session_token": "", "session_expiry": ""}})
+        return None
+    return u
+
+# OTP endpoints (unchanged)
+@app.route("/api/request-otp", methods=["POST"])
+def api_request_otp():
+    data = request.json or {}
+    user_id = data.get("user_id", "").strip()
+    if not user_id:
+        return jsonify({"ok": False, "msg": "Provide user_id"}), 400
+    u = find_user(user_id)
+    if not u:
+        return jsonify({"ok": False, "msg": "User not found"}), 404
+    otp = gen_otp(6)
+    expiry = datetime.utcnow() + timedelta(seconds=RESET_OTP_TTL_SECONDS)
+    users.update_one({"User_ID": user_id}, {"$set": {"reset_otp": otp, "reset_otp_expiry": expiry}})
+    return jsonify({"ok": True, "msg": "OTP generated (demo)", "otp": otp, "ttl_seconds": RESET_OTP_TTL_SECONDS})
+
+@app.route("/api/verify-otp", methods=["POST"])
+def api_verify_otp():
+    data = request.json or {}
+    user_id = data.get("user_id", "").strip()
+    otp = data.get("otp", "").strip()
+    if not user_id or not otp:
+        return jsonify({"ok": False, "msg": "Provide user_id and otp"}), 400
+    u = find_user(user_id)
+    if not u or "reset_otp" not in u:
+        return jsonify({"ok": False, "msg": "OTP not found. Request again"}), 404
+    if u.get("reset_otp_expiry", datetime.utcnow()) < datetime.utcnow():
+        return jsonify({"ok": False, "msg": "OTP expired. Request again."}), 410
+    if u.get("reset_otp") != otp:
+        return jsonify({"ok": False, "msg": "Invalid OTP"}), 401
+    users.update_one({"User_ID": user_id}, {"$set": {"reset_otp_verified": True}, "$unset": {"reset_otp": "", "reset_otp_expiry": ""}})
+    return jsonify({"ok": True, "msg": "OTP verified"})
+
+@app.route("/api/reset-password", methods=["POST"])
+def api_reset_password():
+    data = request.json or {}
+    user_id = data.get("user_id", "").strip()
+    new_password = data.get("new_password", "")
+    if not user_id or not new_password:
+        return jsonify({"ok": False, "msg": "Provide user_id and new_password"}), 400
+    u = find_user(user_id)
+    if not u or not u.get("reset_otp_verified"):
+        return jsonify({"ok": False, "msg": "OTP not verified for this user"}), 403
+    users.update_one({"User_ID": user_id}, {"$set": {"password_hash": sha256_hash(new_password)}, "$unset": {"reset_otp_verified": ""}})
+    return jsonify({"ok": True, "msg": "Password updated"})
+
+# Utility: determine rule-based fraud score per supplied combinations
+def compute_rule_fraud(override_location, device_choice, ip_choice, user_location, current_device, current_ip):
+    """
+    device_choice, ip_choice: strings e.g. "-- keep current --", "Mobile", "unknown", "121.241.105.939"
+    override_location: string from dashboard select (may be "-- keep current --")
+    user_location: location stored in DB (string)
+    returns: (rule_prob, rule_flag_text)
+    """
+    # normalize
+    loc_kept = (not override_location) or override_location.strip() == "" or override_location.strip() == "-- keep current --"
+    device_kept = (not device_choice) or device_choice.strip() == "" or device_choice.strip() == "-- keep current --"
+    ip_kept = (not ip_choice) or ip_choice.strip() == "" or ip_choice.strip() == "-- keep current --"
+
+    device_unknown = (str(device_choice).strip().lower() == "unknown")
+    ip_unknown = (str(ip_choice).strip().lower() == "unknown")
+
+    location_changed = False
+    if loc_kept:
+        location_changed = False
+    else:
+        # if override_location provided and different from user's stored location
+        location_changed = str(override_location).strip() != str(user_location).strip()
+
+    # map exact cases from your list:
+    # 1,2,3,4 -> normal (0)
+    # 5 -> location changed + ip changed + device changed -> 95%
+    # 6 -> location changed + ip unknown + device unknown -> 90%
+    # 7 -> location kept + ip unknown + device unknown -> 85%
+    # 8 -> location kept + ip changed + device unknown -> 80%
+    # 9 -> location kept + ip unknown + device changed -> 80%
+    # 10 -> location changed + ip kept + device kept -> 90% (you specified this)
+
+    # helper: ip_changed and device_changed booleans
+    ip_changed = (not ip_kept) and (not ip_unknown)
+    device_changed = (not device_kept) and (not device_unknown)
+
+    # Case 5: location changed + ip changed + device changed => 95%
+    if location_changed and ip_changed and device_changed:
+        return 0.95, "Location changed + Device changed + IP changed"
+
+    # Case 6: location changed + ip unknown + device unknown => 90%
+    if location_changed and ip_unknown and device_unknown:
+        return 0.90, "Location changed + Unknown Device + Unknown IP"
+
+    # Case 7: location kept + ip unknown + device unknown => 85%
+    if (not location_changed) and ip_unknown and device_unknown:
+        return 0.85, "Location kept + Unknown Device + Unknown IP"
+
+    # Case 8: location kept + ip changed + device unknown => 80%
+    if (not location_changed) and ip_changed and device_unknown:
+        return 0.80, "Location kept + IP changed + Unknown Device"
+
+    # Case 9: location kept + ip unknown + device changed => 80%
+    if (not location_changed) and ip_unknown and device_changed:
+        return 0.80, "Location kept + IP unknown + Device changed"
+
+    # Case 10: location changed + ip kept + device kept => 90%
+    if location_changed and ip_kept and device_kept:
+        return 0.90, "Location changed + IP kept + Device kept"
+
+    # All other cases: normal transaction per your spec: return 0
+    return 0.0, "Normal (per rules)"
+
+# DASHBOARD
+@app.route("/api/dashboard", methods=["GET"])
+def api_dashboard():
+    token = request.headers.get("Authorization")
+    u = validate_session(token)
+    if not u:
+        return jsonify({"ok": False, "msg": "Invalid session"}), 401
+    payload = {
+        "User_ID": u["User_ID"],
+        "name": u.get("name"),
+        "phone_number": u.get("phone_number"),
+        "location": u.get("location"),
+        "account_summary": u.get("account_summary", {}),
+        "recent_transactions": u.get("recent_transactions", []),
+        "allowed_locations": ALLOWED_LOCATIONS,
+        "current_device": (u.get("recent_transactions",[{}])[0].get("Device_Type") if u.get("recent_transactions") else None) or "Mobile",
+        "current_ip": (u.get("recent_transactions",[{}])[0].get("IP_Address") if u.get("recent_transactions") else None) or "127.0.0.1"
+    }
+    return jsonify({"ok": True, "data": payload})
+
+# INITIATE TRANSFER
+@app.route("/api/initiate-transfer", methods=["POST"])
+def api_initiate_transfer():
+    token = request.headers.get("Authorization")
+    u = validate_session(token)
+    if not u:
+        return jsonify({"ok": False, "msg": "Invalid session"}), 401
+    data = request.json or {}
+    try:
+        amount = float(data.get("amount", 0) or 0)
+    except:
+        return jsonify({"ok": False, "msg": "Invalid amount"}), 400
+    beneficiary = data.get("beneficiary", "").strip()
+    txn_id = data.get("txn_id", "") or f"TEMP_{uuid.uuid4().hex[:6]}"
+    remarks = data.get("remarks", "")
+    override_location = data.get("override_location")
+    override_time = data.get("override_time")
+    device_choice = data.get("device_choice", "-- keep current --")
+    ip_choice = data.get("ip_choice", "-- keep current --")
+
+    if amount <= 0 or not beneficiary:
+        return jsonify({"ok": False, "msg": "Provide beneficiary and amount"}), 400
+
+    outflow = float(u.get("account_summary", {}).get("Spend_Analysis", {}).get("Outflow", 0.0) or 0.0)
+    require_secret_key = amount > outflow
+
+    txn_time = override_time or datetime.utcnow().strftime("%d-%m-%Y %H:%M")
+    txn_location = override_location if override_location and override_location != "-- keep current --" else (u.get("location") or "")
+
+    # compute rule-based fraud
+    rule_prob, rule_reason = compute_rule_fraud(override_location, device_choice, ip_choice, u.get("location",""), 
+                                               (u.get("recent_transactions",[{}])[0].get("Device_Type") if u.get("recent_transactions") else "Mobile"),
+                                               (u.get("recent_transactions",[{}])[0].get("IP_Address") if u.get("recent_transactions") else "127.0.0.1"))
+    final_prob = float(rule_prob)
+
+    # If model exists, compute model prob and take max
+    if fraud_model is not None:
+        try:
+            model_txn = {
+                "Transaction_ID": txn_id,
+                "User_ID": u["User_ID"],
+                "Transaction_Amount": amount,
+                "Transaction_Time": txn_time,
+                "Account_Balance": float(u.get("account_summary", {}).get("Total_Balance", 0.0) or 0.0),
+                "Device_Type": device_choice if device_choice and device_choice != "-- keep current --" else (u.get("recent_transactions",[{}])[0].get("Device_Type") or "Mobile"),
+                "Location": txn_location,
+                "Merchant_Category": "Transfer",
+                "IP_Address": ip_choice if ip_choice and ip_choice != "-- keep current --" else (u.get("recent_transactions",[{}])[0].get("IP_Address") or "127.0.0.1"),
+                "IP_Address_Flagged": 1 if str(ip_choice).strip().lower() == "unknown" else 0,
+                "Previous_Transaction_Amount": float(u.get("account_summary", {}).get("Spend_Analysis", {}).get("Outflow", 0.0) or 0.0),
+                "Daily_transaction_count": 1,
+                "Avg_Transaction_Amount_Per_Day": float(u.get("account_summary", {}).get("Spend_Analysis", {}).get("Inflow", 0.0) or 0.0),
+                "Avg_Transactions_amount_7Day": float(u.get("account_summary", {}).get("Spend_Analysis", {}).get("Outflow", 0.0) or 0.0),
+                "Failed_Transaction_Count_7d": 0,
+                "Card_Type": "Debit",
+                "Card_Age_Months": int(u.get("account_summary", {}).get("Card_Age_Months", 0) or 0),
+                "Transaction_Distance_KM": (426.78 if (override_location and override_location != u.get("location","")) else 5.0),
+                "Authentication_Method": "OTP"
+            }
+            df_txn = preprocess_new_data(model_txn)
+            model_prob = float(fraud_model.predict_proba(df_txn)[0][1])
+            final_prob = max(final_prob, model_prob)
+        except Exception as e:
+            print(f"[WARN] model scoring at initiate failed: {e}")
+
+    # Save pending transfer and OTP
+    transfer_otp = gen_otp(6)
+    expiry = datetime.utcnow() + timedelta(seconds=TRANSFER_OTP_TTL_SECONDS)
+    pending = {
+        "amount": amount,
+        "beneficiary": beneficiary,
+        "txn_id": txn_id,
+        "remarks": remarks,
+        "transfer_otp": transfer_otp,
+        "transfer_otp_expiry": expiry,
+        "require_secret_key": require_secret_key,
+        "initiated_at": datetime.utcnow().isoformat(),
+        "fraud_prob": float(final_prob),
+        "rule_prob": float(rule_prob),
+        "rule_reason": rule_reason,
+        "override_location": txn_location,
+        "override_time": txn_time,
+        "device_choice": device_choice,
+        "ip_choice": ip_choice
+    }
+    users.update_one({"User_ID": u["User_ID"]}, {"$set": {"pending_transfer": pending}})
+
+    resp = {
+        "ok": True,
+        "msg": "Transfer OTP generated (demo)",
+        "transfer_otp": transfer_otp,
+        "ttl_seconds": TRANSFER_OTP_TTL_SECONDS,
+        "require_secret_key": require_secret_key,
+        "fraud_prob": float(final_prob),
+        "rule_prob": float(rule_prob),
+        "rule_reason": rule_reason
+    }
+    return jsonify(resp)
+
+# CONFIRM TRANSFER
+@app.route("/api/confirm-transfer", methods=["POST"])
+def api_confirm_transfer():
+    token = request.headers.get("Authorization")
+    u = validate_session(token)
+    if not u:
+        return jsonify({"ok": False, "msg": "Invalid session"}), 401
+    data = request.json or {}
+    entered_otp = data.get("otp", "").strip()
+    entered_secret = data.get("secret_key", "").strip()
+    if not entered_otp:
+        return jsonify({"ok": False, "msg": "Provide otp"}), 400
+
+    u_latest = find_user(u["User_ID"])
+    pending = u_latest.get("pending_transfer")
+    if not pending:
+        return jsonify({"ok": False, "msg": "No pending transfer"}), 400
+    if pending.get("transfer_otp_expiry", datetime.utcnow()) < datetime.utcnow():
+        users.update_one({"User_ID": u["User_ID"]}, {"$unset": {"pending_transfer": ""}})
+        return jsonify({"ok": False, "msg": "Transfer OTP expired"}), 410
+    if pending.get("transfer_otp") != entered_otp:
+        return jsonify({"ok": False, "msg": "Invalid transfer OTP"}), 401
+
+    # verify secret if required
+    if pending.get("require_secret_key"):
+        if not entered_secret:
+            return jsonify({"ok": False, "msg": "Secret key required for this transfer"}), 400
+        stored_hash = u_latest.get("secret_key_hash", "")
+        if stored_hash != sha256_hash(entered_secret.strip()):
+            users.update_one({"User_ID": u["User_ID"]}, {"$unset": {"pending_transfer": ""}})
+            return jsonify({"ok": False, "msg": "Secret key invalid: transaction blocked (suspicious)"}), 403
+
+    # recompute model if available and pick max
+    final_prob = float(pending.get("fraud_prob", 0.0))
+    if fraud_model is not None:
+        try:
+            txn_features = {
+                "Transaction_ID": pending.get("txn_id", ""),
+                "User_ID": u["User_ID"],
+                "Transaction_Amount": float(pending.get("amount", 0.0)),
+                "Transaction_Time": pending.get("override_time"),
+                "Account_Balance": float(u.get("account_summary", {}).get("Total_Balance", 0.0) or 0.0),
+                "Device_Type": pending.get("device_choice") if pending.get("device_choice") != "-- keep current --" else (u.get("recent_transactions",[{}])[0].get("Device_Type") or "Mobile"),
+                "Location": pending.get("override_location"),
+                "Merchant_Category": "Transfer",
+                "IP_Address": pending.get("ip_choice") if pending.get("ip_choice") != "-- keep current --" else (u.get("recent_transactions",[{}])[0].get("IP_Address") or "127.0.0.1"),
+                "IP_Address_Flagged": 1 if str(pending.get("ip_choice")).strip().lower() == "unknown" else 0,
+                "Previous_Transaction_Amount": float(u.get("account_summary", {}).get("Spend_Analysis", {}).get("Outflow", 0.0) or 0.0),
+                "Daily_transaction_count": 1,
+                "Avg_Transaction_Amount_Per_Day": float(u.get("account_summary", {}).get("Spend_Analysis", {}).get("Inflow", 0.0) or 0.0),
+                "Avg_Transactions_amount_7Day": float(u.get("account_summary", {}).get("Spend_Analysis", {}).get("Outflow", 0.0) or 0.0),
+                "Failed_Transaction_Count_7d": 0,
+                "Card_Type": "Debit",
+                "Card_Age_Months": int(u.get("account_summary", {}).get("Card_Age_Months", 0) or 0),
+                "Transaction_Distance_KM": (426.78 if (pending.get("override_location") and pending.get("override_location") != u.get("location","")) else 5.0),
+                "Authentication_Method": "OTP"
+            }
+            df_txn = preprocess_new_data(txn_features)
+            model_prob = float(fraud_model.predict_proba(df_txn)[0][1])
+            final_prob = max(final_prob, model_prob)
+        except Exception as e:
+            print(f"[WARN] model scoring failed at confirm: {e}")
+
+    # Build fraud_alerts to send to frontend
+    # We'll include: risk (0-1), rule_reason, user_location_for_message
+    user_db_location = u_latest.get("location", "")
+    override_loc = pending.get("override_location") or user_db_location
+    # Determine message location text: either new location or DB location depending on whether override provided
+    message_loc = override_loc if override_loc else user_db_location
+
+    fraud_alerts = {
+        "risk_score": float(final_prob),
+        "rule_prob": float(pending.get("rule_prob", 0.0)),
+        "rule_reason": pending.get("rule_reason", ""),
+        "location_for_message": message_loc
+    }
+
+    # Blocking thresholds: per your request, we treat any rule_prob >= 0.8 or final_prob >= 0.8 as blocked (show banner)
+    # But we will use the exact mapping you gave — and if final_prob >= 0.8, block.
+    if final_prob >= 0.8:
+        # log
+        db["fraud_logs"].insert_one({
+            "user_id": u_latest["User_ID"],
+            "amount": float(pending.get("amount", 0)),
+            "model_fraud_prob": float(final_prob),
+            "rule_prob": float(pending.get("rule_prob", 0.0)),
+            "time": datetime.utcnow()
+        })
+        users.update_one({"User_ID": u_latest["User_ID"]}, {"$unset": {"pending_transfer": ""}})
+        # Create the standard message body per your format
+        # Round percentages to whole numbers for display
+        pct = int(round(final_prob * 100))
+        extra_msg = f" Unknown device & Unknown IP address at location {message_loc} — Transaction not possible."
+        resp = {"ok": False, "msg": f"⚠️ AI flagged this transaction as suspicious (RISK SCORE: {pct}% ).{extra_msg}", "fraud_prob": final_prob}
+        resp["fraud_alerts"] = fraud_alerts
+        return jsonify(resp), 403
+
+    # Proceed: debit and append transaction (success)
+    amt = float(pending["amount"])
+    acct = u_latest.get("account_summary", {})
+    total_bal = float(acct.get("Total_Balance", 0.0) or 0.0)
+    if amt > total_bal:
+        users.update_one({"User_ID": u_latest["User_ID"]}, {"$unset": {"pending_transfer": ""}})
+        return jsonify({"ok": False, "msg": "Insufficient funds"}), 402
+
+    new_total = total_bal - amt
+    txn = {
+        "Transaction_ID": pending.get("txn_id", ""),
+        "type": "Transfer",
+        "Merchant_Category": "Transfer",
+        "Transaction_Amount": -amt,
+        "time": pending.get("override_time") or datetime.utcnow().strftime("%d/%m/%Y %H:%M:%S"),
+        "Transaction_Time": pending.get("override_time") or datetime.utcnow().strftime("%d-%m-%Y %H:%M"),
+        "Location": pending.get("override_location") or u_latest.get("location",""),
+        "remark": pending.get("remarks", ""),
+        "txn_id": pending.get("txn_id", "")
+    }
+
+    users.update_one({"User_ID": u_latest["User_ID"]}, {
+        "$set": {"account_summary.Total_Balance": new_total},
+        "$push": {"recent_transactions": {"$each": [txn], "$position": 0}},
+        "$unset": {"pending_transfer": ""}}
+    )
+    return jsonify({"ok": True, "msg": "Transfer completed", "new_balance": new_total, "txn": txn})
+
+# LOGOUT
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    token = request.headers.get("Authorization")
+    u = validate_session(token)
+    if not u:
+        return jsonify({"ok": False, "msg": "Invalid session"}), 401
+    users.update_one({"User_ID": u["User_ID"]}, {"$unset": {"session_token": "", "session_expiry": ""}})
+    return jsonify({"ok": True, "msg": "Logged out"})
+
+# DEMO USER HELPER (unchanged)
+@app.route("/api/demo-user", methods=["GET"])
+def api_demo_user():
+    some_user = users.find_one({}, {"User_ID": 1, "demo_plain_password": 1, "demo_plain_secret": 1, "name": 1})
+    if not some_user:
+        return jsonify({"ok": False, "msg": "No users found. Run generate_user_to_mongo.py first."}), 404
+    return jsonify({"ok": True, "data": {
+        "User_ID": some_user["User_ID"],
+        "password": some_user.get("demo_plain_password"),
+        "secret": some_user.get("demo_plain_secret"),
+        "name": some_user.get("name")
+    }})
+
+if __name__ == "__main__":
+    print("Serving frontend from:", FRONTEND_DIR)
+    app.run(debug=True, port=5000)
+
+
+///FRONTEND///
+
+1)index.html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Secure Pay — Login</title>
+  <link rel="stylesheet" href="assets/css/styles.css"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SECURE PAY</div>
+    <div class="top-right">Call Us: +91 98765 | Welcome, Guest</div>
+  </header>
+
+  <main class="center-page">
+    <div class="card auth-card">
+      <h2>Welcome Back</h2>
+      <p class="muted">Sign in to access your account with AI-powered security</p>
+      <label>User ID</label>
+      <input id="login_user_id" placeholder="Enter your User ID"/>
+      <label>Password</label>
+      <input id="login_password" type="password" placeholder="Enter your Password"/>
+      <button id="btn_login" class="primary">Login</button>
+      <div class="link-row">
+        <a id="forgot_link" href="#">Forgot Password?</a>
+      </div>
+    </div>
+  </main>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="modal card">
+      <div id="forgot_step1">
+        <a id="back_to_login" class="back">&larr; Back to Login</a>
+        <h3>Reset Password</h3>
+        <p>Enter the User ID to receive an OTP to the phone number on record</p>
+        <input id="fp_user_id" placeholder="Enter your User ID"/>
+        <button id="btn_request_otp" class="primary">Send OTP</button>
+      </div>
+
+      <div id="forgot_step2" class="hidden">
+        <a id="back_to_login2" class="back">&larr; Back to Login</a>
+        <h3>Reset Password</h3>
+        <p>Enter the OTP shown in the bottom-right (demo)</p>
+        <input id="input_otp" placeholder="6-digit OTP"/>
+        <button id="btn_verify_otp" class="primary">Verify OTP</button>
+      </div>
+
+      <div id="forgot_step3" class="hidden">
+        <a id="back_to_login3" class="back">&larr; Back to Login</a>
+        <h3>Reset Password</h3>
+        <p>Create a new password</p>
+        <input id="new_password" type="password" placeholder="Enter new password"/>
+        <input id="confirm_password" type="password" placeholder="Confirm new password"/>
+        <button id="btn_reset_password" class="primary">Reset Password</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
+
+
+2)dashboard.html
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Secure Pay — Dashboard</title>
+  <link rel="stylesheet" href="assets/css/styles.css"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SECURE PAY</div>
+    <div id="top-user" class="top-right">Call Us: +91 98765 | Welcome, User</div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <ul>
+        <li><a data-page="overview" class="nav active">🏠  Overview</a></li>
+        <li><a data-page="accounts" class="nav">💳  Accounts</a></li>
+        <li><a data-page="transfer" class="nav">💸  Payment & Transfer</a></li>
+        <li><a data-page="service" class="nav">👤  Customer Service</a></li>
+        <li><a id="btn_logout" class="nav">🚪  Logout</a></li>
+      </ul>
+    </aside>
+
+    <section class="content">
+      <!-- OVERVIEW: Device and IP selects -->
+      <div id="page_overview" class="page">
+        <h2 id="welcome_line">Welcome Back</h2>
+        <div class="muted" style="margin-bottom:8px">
+          <span id="user_location">Location: -</span> • <span id="user_phone">Phone: -</span>
+        </div>
+
+        <div class="card" style="margin-bottom:12px">
+
+  <!-- ROW 1 -->
+  <div class="row-inline">
+    <div style="flex:1; min-width:200px">
+      <label style="font-weight:600">Location</label>
+      <select id="select_location" class="small-input">
+        <option>-- keep current --</option>
+      </select>
+    </div>
+
+    <div style="flex:1; min-width:240px; margin-left:12px">
+      <label style="font-weight:600">Date &amp; time</label>
+      <input id="manual_dt" class="small-input" placeholder="DD-MM-YYYY HH:MM (e.g. 30-10-2025 19:30)"/>
+    </div>
+  </div>
+
+  <!-- ROW 2 -->
+  <div class="row-inline" style="margin-top:12px;">
+    <div style="flex:1; min-width:220px">
+      <label style="font-weight:600">Device</label>
+      <select id="select_device" class="small-input">
+        <option>-- keep current --</option>
+        <option>Mobile</option>
+        <option>Desktop</option>
+        <option>Tablet</option>
+        <option>unknown</option>
+      </select>
+    </div>
+
+    <div style="flex:1; min-width:240px; margin-left:12px">
+      <label style="font-weight:600">IP Address</label>
+      <select id="select_ip" class="small-input">
+        <option>-- keep current --</option>
+        <option>172.137.209.116</option>
+        <option>121.241.105.939</option>
+        <option>223.105.588.242</option>
+        <option>133.234.244.188</option>
+        <option>unknown</option>
+      </select>
+    </div>
+  </div>
+
+</div>
+
+        <div class="grid two">
+          <div class="card">
+            <h4>💰 Total Balance</h4>
+            <div id="total_balance" class="big">₹0.00</div>
+            <button class="ghost" id="btn_view_accounts">View Accounts</button>
+          </div>
+          <div class="card">
+            <h4>🛡️ AI Protection Status</h4>
+            <p>✓ Active<br/>Real-time monitoring enabled</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>Spend Analysis</h4>
+          <div class="grid two">
+            <div>Inflow: <span id="inflow">-</span></div>
+            <div>Outflow: <span id="outflow">-</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>Recent Transactions</h4>
+          <ul id="recent_transactions"></ul>
+        </div>
+      </div>
+
+      <!-- ACCOUNTS -->
+      <div id="page_accounts" class="page hidden">
+        <h2>My Accounts</h2>
+        <p>Manage your bank accounts and cards</p>
+        <div class="accounts-grid">
+          <div class="account-card card">
+            <h3>SAVINGS ACCOUNT <span id="user_short" class="pill"></span></h3>
+            <div class="big" id="savings_balance">₹0.00</div>
+            <p class="muted">All Savings Balance <span id="balance_text">₹0.00</span></p>
+            <div class="button-row">
+              <button class="small">💰 Add Funds</button>
+              <button class="small">📄 View Statement</button>
+              <button class="small" id="go_transfer">➡️ Transfer Funds</button>
+            </div>
+            <div style="margin-top:12px">
+              <div>Available to Spend: <strong id="available_spend">₹0.00</strong></div>
+              <div>Linked Fixed Deposit: ₹0.00</div>
+              <div>Cheques in Clearing: ₹0.00</div>
+            </div>
+            <button class="ghost" style="margin-top:12px">VIEW ACCOUNT DETAILS</button>
+          </div>
+
+          <div class="card-info card">
+            <div class="debit-card">
+              <div class="chip"></div>
+              <div class="card-number">************<span id="card_last4">5651</span></div>
+              <div class="card-footer">
+                <div>
+                  <div class="small muted">EXPIRES</div>
+                  <div>03/30</div>
+                </div>
+                <div>
+                  <div class="small muted">CVV</div>
+                  <div>***</div>
+                </div>
+              </div>
+            </div>
+            <div class="button-row" style="margin-top:12px">
+              <button class="small">🔒 Set Pin</button>
+              <button class="small">👁️ View CVV</button>
+            </div>
+            <div style="margin-top:12px">
+              <div>Card Age: <span id="card_age">0</span> months</div>
+              <div>Card Status: <span class="pill small">Active</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h4>Recent Transactions</h4>
+          <ul id="recent_transactions_accounts"></ul>
+        </div>
+      </div>
+
+      <!-- TRANSFER -->
+      <div id="page_transfer" class="page hidden">
+        <h2>Payment & Transfer</h2>
+        <p>AI-powered fraud detection monitors every transaction</p>
+        <div class="card">
+          <h4>Transfer Funds</h4>
+          <input id="beneficiary" placeholder="Beneficiary Name (Enter recipient name)"/>
+          <input id="txn_id" placeholder="Transaction ID / UPI ID (Enter transaction ID or UPI ID)"/>
+          <input id="amount" placeholder="Amount (₹) (Enter amount)"/>
+          <textarea id="remarks" placeholder="Remarks (Optional) (Enter transaction remarks)"></textarea>
+          <button id="btn_initiate" class="primary">Proceed to Transfer</button>
+          <p class="muted">Requires OTP and secret key for high-value transactions.</p>
+        </div>
+
+        <div id="transfer_verify" class="card hidden">
+          <h4>Verify Transfer</h4>
+          <p>An OTP will be sent (demo). Enter the OTP and your secret key if requested.</p>
+          <input id="transfer_otp_input" placeholder="Enter OTP"/>
+          <input id="transfer_secret_input" placeholder="Enter Secret Key (if required)"/>
+          <div style="margin-top:12px">
+            <button id="btn_confirm_transfer" class="primary">Confirm Transfer</button>
+          </div>
+          <div id="transfer_result" class="muted" style="margin-top:12px"></div>
+
+          <div id="fraud_banner" class="card hidden" style="border-left:4px solid #ffdede;color:#b71c1c;margin-top:10px;">
+            <strong id="fraud_msg">⚠️ Suspicious activity detected</strong>
+            <div id="fraud_details" style="font-size:13px;margin-top:6px"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h4>Recent Transactions</h4>
+          <ul id="recent_transactions_transfer"></ul>
+        </div>
+      </div>
+
+      <!-- SERVICE -->
+      <div id="page_service" class="page hidden">
+        <h2>Customer Service</h2>
+        <div class="grid three">
+          <div class="card">
+            <h4>💬 Live Chat</h4><button class="small">Start Chat</button>
+          </div>
+          <div class="card">
+            <h4>📞 Call Us</h4><p>+91 98765 (Toll Free)</p><button class="small"> Call Now</button>
+          </div>
+          <div class="card">
+            <h4>✉️ Email Support</h4><button class="small">Send Email</button>
+          </div>
+          <div class="card">
+            <h4>❓ FAQs</h4><button class="small">Browse FAQs</button>
+          </div>
+          <div class="card">
+            <h4>🔒 Report Fraud</h4><button class="small">Report Now</button>
+          </div>
+          <div class="card">
+            <h4>💳Card Services</h4><button class="small">Manage Cards</button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
+
+3)styles.css
+
+:root{--accent:#ff6f3c;--muted:#666}
+*{box-sizing:border-box}
+body{font-family:Inter,Arial,Helvetica,sans-serif;margin:0;background:#f4f6f8;color:#222}
+.topbar{height:56px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 18px}
+.brand{font-weight:700}
+.center-page{display:flex;justify-content:center;align-items:center;height:calc(100vh - 56px)}
+.card{background:#fff;border-radius:8px;padding:20px;box-shadow:0 6px 20px rgba(0,0,0,0.06);margin:10px}
+.auth-card{width:420px;text-align:left}
+.auth-card input{width:100%;padding:10px;margin:8px 0;border-radius:6px;border:1px solid #e6e6e6}
+.primary{background:var(--accent);color:#fff;padding:10px 14px;border:none;border-radius:8px;width:100%;cursor:pointer}
+.ghost{background:#f0f0f0;padding:8px;border-radius:8px;border:none}
+.link-row{text-align:center;margin-top:10px}
+.link-row a{color:var(--accent);text-decoration:none}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.35)}
+.modal{width:420px}
+.hidden{display:none}
+.back{color:var(--muted);display:inline-block;margin-bottom:8px;cursor:pointer}
+.layout{display:flex;height:calc(100vh - 56px)}
+.sidebar{width:220px;background:#fff;padding:20px;border-right:1px solid #eee}
+.sidebar ul{list-style:none;padding:0}
+.sidebar li{margin:12px 0}
+.sidebar a{color:#333;text-decoration:none;display:inline-block;width:100%}
+.nav.active{font-weight:700;color:var(--accent)}
+.content{flex:1;padding:20px;overflow:auto}
+.big{font-size:28px;font-weight:700}
+.grid.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid.three{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.button-row{display:flex;gap:8px;margin-top:10px}
+.small{padding:6px;border-radius:6px;border:none;background:#f4f4f4}
+.muted{color:var(--muted);font-size:13px}
+.pill{background:#fff;border-radius:14px;padding:6px 10px;border:1px solid #f0f0f0;font-size:12px}
+.accounts-grid{display:grid;grid-template-columns:2fr 1fr;gap:20px}
+.account-card, .card-info{background:#fff;padding:18px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,0.04)}
+.debit-card{background:linear-gradient(135deg,#1e62d0,#406ef0);color:#fff;padding:18px;border-radius:10px;height:160px}
+.debit-card .chip{width:40px;height:28px;background:#ffd166;border-radius:4px;margin-bottom:8px}
+.debit-card .card-number{font-size:18px;letter-spacing:3px;margin-top:12px}
+.debit-card .card-footer{display:flex;justify-content:space-between;margin-top:18px;font-size:14px}
+input, textarea, select{width:100%;padding:12px;border-radius:8px;border:1px solid #e9e9e9;margin-top:8px;margin-bottom:12px;background:#fafafa}
+textarea{min-height:80px;resize:vertical}
+.toast{position:fixed;right:18px;bottom:18px;background:#fff;padding:12px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.12);border-left:4px solid var(--accent)}
+.toast.otp{padding:10px 12px;border-left:4px solid #1e62d0;right:18px;bottom:18px}
+#fraud_banner{margin-bottom:12px;padding:12px;border-radius:8px;background:#fff}
+.row-inline{display:flex;align-items:flex-start;gap:8px}
+.small-input{padding:10px;border-radius:8px;border:1px solid #e9e9e9;background:#fafafa;width:100%}
+.small-row .small-label{font-size:13px;color:#444}
+.small-row input[type="checkbox"]{transform:scale(1.05);margin-right:8px}
+.transfer-blocked { color: #b71c1c; font-size: 20px; font-weight:700; margin-top:12px; }
+.transfer-success { color: #0a8e42; font-size: 16px; font-weight:700; margin-top:6px; }
+#fraud_banner strong { color: #b71c1c !important; }
+#fraud_msg { color: #b71c1c !important; }
+#fraud_banner { border-left: 5px solid #ff5252 !important; background: #fff5f5 !important; }
+
+/* Recent transaction styles */
+.recent-item { display:flex; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid #f1f1f1; }
+.recent-meta { font-size:12px; color: #666; }
+
+4)app.js
+
+// app.js - frontend logic (Dashboard selects -> Transfer)
+const API_ROOT = "http://127.0.0.1:5000/api";
+function id(n){return document.getElementById(n);}
+const toastEl = id("toast");
+function showToast(msg, ttl=4000, cls=""){ toastEl.textContent = msg; toastEl.className="toast"; if(cls) toastEl.classList.add(cls); toastEl.classList.remove("hidden"); if(ttl>0) setTimeout(()=>toastEl.classList.add("hidden"), ttl); }
+function hideToast(){ toastEl.classList.add("hidden"); }
+
+// LOGIN page handlers (index.html expected)
+if (id("btn_login")){
+  id("btn_login").onclick = async ()=>{
+    const user_id = id("login_user_id").value.trim();
+    const password = id("login_password").value;
+    if(!user_id||!password){ showToast("Enter credentials",2000); return; }
+    const res = await fetch(API_ROOT + "/login", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({user_id, password})
+    });
+    const j = await res.json();
+    if(!j.ok){ showToast(j.msg,3000); return; }
+    localStorage.setItem("session_token", j.data.token);
+    window.location.href = "/dashboard.html";
+  };
+  // forgot password UI (unchanged)
+  id("forgot_link").onclick = (e)=>{ e.preventDefault(); id("overlay").classList.remove("hidden"); showStep(1); };
+  function showStep(n){
+    id("forgot_step1").classList.toggle("hidden", n!==1);
+    id("forgot_step2").classList.toggle("hidden", n!==2);
+    id("forgot_step3").classList.toggle("hidden", n!==3);
+  }
+  ["back_to_login","back_to_login2","back_to_login3"].forEach(x=>{ if(id(x)) id(x).onclick=()=>{ id("overlay").classList.add("hidden"); hideToast(); } });
+  if(id("btn_request_otp")) id("btn_request_otp").onclick = async ()=>{
+    const u = id("fp_user_id").value.trim(); if(!u){ showToast("Enter User ID",2000); return; }
+    const res = await fetch(API_ROOT + "/request-otp", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({user_id:u})});
+    const j = await res.json();
+    if(!j.ok){ showToast(j.msg,3000); return; }
+    showStep(2); showToast("OTP (demo): "+j.otp, 0, "otp"); localStorage.setItem("reset_user", u);
+  };
+  if(id("btn_verify_otp")) id("btn_verify_otp").onclick = async ()=>{
+    const u = localStorage.getItem("reset_user"), otp = id("input_otp").value.trim(); if(!u||!otp){ showToast("Enter OTP",2000); return; }
+    const res = await fetch(API_ROOT + "/verify-otp", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({user_id:u, otp})});
+    const j = await res.json(); if(!j.ok){ showToast(j.msg,3000); return; } hideToast(); showStep(3);
+  };
+  if(id("btn_reset_password")) id("btn_reset_password").onclick = async ()=>{
+    const u = localStorage.getItem("reset_user"), p1=id("new_password").value, p2=id("confirm_password").value;
+    if(!p1||p1!==p2){ showToast("Passwords must match",2000); return; }
+    const res = await fetch(API_ROOT + "/reset-password", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({user_id:u, new_password:p1})});
+    const j = await res.json(); if(!j.ok){ showToast(j.msg,3000); return; }
+    showToast("Password updated. Login with new password.",3000); id("overlay").classList.add("hidden");
+  };
+}
+
+// DASHBOARD pages
+if (window.location.pathname.endsWith("dashboard.html")){
+  const token = localStorage.getItem("session_token");
+  if(!token){ window.location.href="/"; }
+
+  // nav switching
+  document.querySelectorAll(".sidebar .nav").forEach(el=>{
+    el.addEventListener("click", (e)=>{
+      document.querySelectorAll(".sidebar .nav").forEach(x=>x.classList.remove("active"));
+      e.currentTarget.classList.add("active");
+      const p = e.currentTarget.getAttribute("data-page");
+      document.querySelectorAll(".page").forEach(x=>x.classList.add("hidden"));
+      document.getElementById("page_"+p).classList.remove("hidden");
+      if(p==="overview") loadOverview();
+      if(p==="accounts") loadAccounts();
+      if(p==="transfer") loadTransfer();
+    });
+  });
+
+  id("btn_logout").onclick = async ()=>{
+    await fetch(API_ROOT + "/logout", {method:"POST", headers:{"Authorization": token}});
+    localStorage.removeItem("session_token"); window.location.href="/";
+  };
+
+  id("btn_view_accounts")?.addEventListener("click", ()=>document.querySelector('[data-page="accounts"]').click());
+  id("go_transfer")?.addEventListener("click", ()=>document.querySelector('[data-page="transfer"]').click());
+
+  loadOverview(); refreshTransactions(); loadAccounts();
+
+  async function loadOverview(){
+    const res = await fetch(API_ROOT + "/dashboard", {headers:{"Authorization": token}});
+    const j = await res.json(); if(!j.ok){ showToast("Session expired",2000); localStorage.removeItem("session_token"); window.location.href="/"; return; }
+    const d = j.data;
+    id("welcome_line").textContent = `Welcome Back, ${d.name || d.User_ID}!`;
+    id("user_location").textContent = "Location: " + (d.location||"-");
+    id("user_phone").textContent = "Phone: " + (d.phone_number||"-");
+    id("total_balance").textContent = "₹" + ((d.account_summary.Total_Balance||0).toFixed(2));
+    id("inflow").textContent = "₹" + ((d.account_summary.Spend_Analysis||{}).Inflow||0).toFixed(2);
+    id("outflow").textContent = "₹" + ((d.account_summary.Spend_Analysis||{}).Outflow||0).toFixed(2);
+
+    // populate location select with allowed locations and set default to keep current
+    const sel = id("select_location"); sel.innerHTML = "<option>-- keep current --</option>";
+    (d.allowed_locations||[]).forEach(loc=>{ const opt=document.createElement("option"); opt.value=loc; opt.textContent=loc; sel.appendChild(opt);});
+
+    // ensure current device/ip are visible in selects
+    if(d.current_device){
+      const sdev = id("select_device");
+      if([...sdev.options].every(o=>o.value !== d.current_device)){
+        const opt = document.createElement("option"); opt.value = d.current_device; opt.textContent = d.current_device;
+        sdev.appendChild(opt);
+      }
+    }
+    if(d.current_ip){
+      const sip = id("select_ip");
+      if([...sip.options].every(o=>o.value !== d.current_ip)){
+        const opt = document.createElement("option"); opt.value = d.current_ip; opt.textContent = d.current_ip;
+        sip.appendChild(opt);
+      }
+    }
+
+    // recent transactions (overview)
+    id("recent_transactions").innerHTML = "";
+    (d.recent_transactions||[]).slice(0,6).forEach(tx=>{
+      const li = document.createElement("li");
+      const time = tx.Transaction_Time || tx.time || "";
+      const amt = tx.Transaction_Amount || tx.amount || 0;
+      const remark = tx.remark || tx.Merchant_Category || tx.type || "";
+      li.innerHTML = `<div class="recent-item"><div><strong>${remark}</strong><div class="recent-meta">${tx.Location||''} • ${time}</div></div><div style="text-align:right"><div style="color:${amt<0?'#e65555':'#0a8e42'}">${amt<0?('₹'+Math.abs(amt).toFixed(2)):('₹'+(amt).toFixed(2))}</div></div></div>`;
+      id("recent_transactions").appendChild(li);
+    });
+
+    hideFraudBanner(); id("top-user").textContent = `Call Us: +91 98765 | Welcome, ${d.name || d.User_ID}`;
+  }
+
+  async function loadAccounts(){
+    const res = await fetch(API_ROOT + "/dashboard", {headers:{"Authorization": token}});
+    const j = await res.json(); if(!j.ok){ showToast("Session expired",2000); localStorage.removeItem("session_token"); window.location.href="/"; return; }
+    const d = j.data;
+    id("user_short").textContent = (" " + d.User_ID).slice(0,10);
+    id("savings_balance").textContent = "₹" + (d.account_summary.Total_Balance||0).toFixed(2);
+    id("balance_text").textContent = "₹" + (d.account_summary.Total_Balance||0).toFixed(2);
+    id("available_spend").textContent = "₹" + (d.account_summary.Total_Balance||0).toFixed(2);
+    id("card_last4").textContent = (d.account_summary.Card_Number || "************5651").slice(-4);
+    id("card_age").textContent = d.account_summary.Card_Age_Months || 0;
+    const list = id("recent_transactions_accounts"); if(list) list.innerHTML = "";
+    (d.recent_transactions||[]).slice(0,6).forEach(tx=>{
+      if(!list) return;
+      const li = document.createElement("li");
+      const amt = tx.Transaction_Amount || tx.amount || 0;
+      li.innerHTML = `<div style="display:flex;justify-content:space-between"><div><strong>${tx.Merchant_Category||tx.type}</strong><div style="font-size:12px;color:#666">${tx.Transaction_Time||tx.time}</div></div><div style="color:${amt<0?'#e65555':'#0a8e42'}">${amt<0?('₹'+Math.abs(amt).toFixed(2)):(amt>0?('₹'+amt.toFixed(2)):'')}</div></div>`;
+      list.appendChild(li);
+    });
+  }
+
+  async function loadTransfer(){
+    id("beneficiary").value = ""; id("txn_id").value = ""; id("amount").value = ""; id("remarks").value = "";
+    id("transfer_otp_input").value=""; id("transfer_secret_input").value=""; id("transfer_secret_input").style.display="none";
+    id("transfer_verify").classList.add("hidden"); id("transfer_result").textContent=""; hideFraudBanner();
+  }
+
+  function showFraudBanner(serverAlerts){
+    const banner = id("fraud_banner"); if(!banner) return;
+    banner.classList.remove("hidden");
+    // serverAlerts expected: {risk_score:0.95, location_for_message: "..."}
+    const pct = Math.round((serverAlerts && serverAlerts.risk_score || 0) * 100);
+    id("fraud_msg").textContent = `⚠️ AI flagged this transaction as suspicious (RISK SCORE: ${pct}% ).`;
+    const loc = serverAlerts && serverAlerts.location_for_message ? serverAlerts.location_for_message : "-";
+    id("fraud_details").textContent = `Unknown device & Unknown IP address at location ${loc} — Transaction not possible.`;
+  }
+  function hideFraudBanner(){ const b=id("fraud_banner"); if(b) b.classList.add("hidden"); }
+
+  // Initiate transfer: send selected dashboard values
+  id("btn_initiate").onclick = async ()=>{
+    const beneficiary = id("beneficiary").value.trim();
+    const txn_id = id("txn_id").value.trim();
+    const amount = id("amount").value.trim();
+    const remarks = id("remarks").value.trim();
+    if(!beneficiary || !amount){ showToast("Enter beneficiary and amount",3000); return; }
+
+    // read dashboard selections
+    const override_location = id("select_location") ? id("select_location").value : "-- keep current --";
+    const override_time = id("manual_dt") ? id("manual_dt").value.trim() : "";
+    const device_choice = id("select_device") ? id("select_device").value : "-- keep current --";
+    const ip_choice = id("select_ip") ? id("select_ip").value : "-- keep current --";
+
+    const res = await fetch(API_ROOT + "/initiate-transfer", {
+      method:"POST",
+      headers: {"Content-Type":"application/json", "Authorization": token},
+      body: JSON.stringify({beneficiary, txn_id, amount, remarks, override_location, override_time, device_choice, ip_choice})
+    });
+    const j = await res.json();
+    if(!j.ok){ showToast(j.msg || "Error",4000); return; }
+
+    // show OTP toast and reveal verify area; DO NOT show fraud banner yet (we show banner after confirm only)
+    showToast("Transfer OTP (demo): " + j.transfer_otp, j.ttl_seconds*1000, "otp");
+    setTimeout(()=> hideToast(), j.ttl_seconds*1000);
+    id("transfer_verify").classList.remove("hidden");
+    id("transfer_result").textContent = "";
+    id("transfer_secret_input").style.display = j.require_secret_key ? "block" : "none";
+  };
+
+  // Confirm transfer: show fraud banner if blocked
+  id("btn_confirm_transfer").onclick = async ()=>{
+    const otp = id("transfer_otp_input").value.trim();
+    const secret = id("transfer_secret_input").value.trim();
+    if(!otp){ showToast("Enter OTP",3000); return; }
+    const res = await fetch(API_ROOT + "/confirm-transfer", {
+      method:"POST", headers: {"Content-Type":"application/json","Authorization": token},
+      body: JSON.stringify({otp, secret_key: secret})
+    });
+    const j = await res.json();
+    if(!j.ok){
+      // show fraud banner (backend sends 'fraud_alerts')
+      if(j.fraud_alerts) showFraudBanner(j.fraud_alerts);
+      id("transfer_result").textContent = j.msg || "Transfer blocked";
+      id("transfer_result").classList.remove("transfer-success");
+      id("transfer_result").classList.add("transfer-blocked");
+      await refreshTransactions(); loadOverview(); loadAccounts();
+      return;
+    }
+    // success
+    hideFraudBanner();
+    showToast("Transfer successful",3000);
+    const remark = j.txn.remark || "Transfer";
+    const amt = Math.abs(j.txn.Transaction_Amount || 0).toFixed(2);
+    const loc = j.txn.Location || "";
+    const timing = j.txn.Transaction_Time || j.txn.time || "";
+    id("transfer_result").innerHTML = `<strong>${remark}</strong> — ₹${amt} SUCCESS<br/><span class="recent-meta">${loc} • ${timing}</span>`;
+    id("transfer_result").classList.remove("transfer-blocked");
+    id("transfer_result").classList.add("transfer-success");
+    await refreshTransactions(); loadOverview(); loadAccounts();
+  };
+
+  // Recent transactions list (transfer page)
+  async function refreshTransactions(){
+    const res = await fetch(API_ROOT + "/dashboard", {headers:{"Authorization": token}});
+    const j = await res.json(); if(!j.ok) return;
+    const list = id("recent_transactions_transfer"); if(list) list.innerHTML = "";
+    (j.data.recent_transactions || []).slice(0,8).forEach(tx=>{
+      if(!list) return;
+      const li = document.createElement("li");
+      const amt = tx.Transaction_Amount || tx.amount || 0;
+      const remark = tx.remark || tx.Merchant_Category || tx.type || 'Transfer';
+      const time = tx.Transaction_Time || tx.time || '';
+      const location = tx.Location || '';
+      const rightText = `<div style="color:#0a8e42">₹${Math.abs(amt).toFixed(2)} SUCCESS</div>`;
+      li.innerHTML = `<div style="display:flex;justify-content:space-between"><div><strong>${remark}</strong><div style="font-size:12px;color:#666">${location} • ${time}</div></div><div>${rightText}</div></div>`;
+      list.appendChild(li);
+    });
+  }
+}
+
+
+
+////TERMINALL in vs code//
+cd backend
+python split.py
+python train_random_forest.py
+python predict.py
+
+python generate_user_to_mongo.py
+
+//COMMAND PROMPT ///
+cd C:\Program Files\MongoDB\Server\8.2\bin
+mongod
+
+// IN MONGODB SHELL///
+mongosh
+use fraud_detection_db
+show collections
+users
+db.users.find({}, {User_ID: 1, name: 1}).limit(10)
+db.users.findOne({User_ID: "U695651"})
+
+///vs code//
+cd D:\AI_Fraud_detection\backend
+python app.py
+
+
+

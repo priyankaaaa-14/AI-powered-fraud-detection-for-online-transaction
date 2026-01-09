@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Secure Pay — Dashboard</title>
+  <link rel="stylesheet" href="assets/css/styles.css"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SECURE PAY</div>
+    <div id="top-user" class="top-right">Call Us: +91 98765 | Welcome, User</div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <ul>
+        <li><a data-page="overview" class="nav active">🏠  Overview</a></li>
+        <li><a data-page="accounts" class="nav">💳  Accounts</a></li>
+        <li><a data-page="transfer" class="nav">💸  Payment & Transfer</a></li>
+        <li><a data-page="service" class="nav">👤  Customer Service</a></li>
+        <li><a id="btn_logout" class="nav">🚪  Logout</a></li>
+      </ul>
+    </aside>
+
+    <section class="content">
+      <!-- OVERVIEW: Device and IP selects -->
+      <div id="page_overview" class="page">
+        <h2 id="welcome_line">Welcome Back</h2>
+        <div class="muted" style="margin-bottom:8px">
+          <span id="user_location">Location: -</span> • <span id="user_phone">Phone: -</span>
+        </div>
+
+        <div class="card" style="margin-bottom:12px">
+
+  <!-- ROW 1 -->
+  <div class="row-inline">
+    <div style="flex:1; min-width:200px">
+      <label style="font-weight:600">Location</label>
+      <select id="select_location" class="small-input">
+        <option>-- keep current --</option>
+      </select>
+    </div>
+
+    <div style="flex:1; min-width:240px; margin-left:12px">
+      <label style="font-weight:600">Date &amp; time</label>
+      <input id="manual_dt" class="small-input" placeholder="DD-MM-YYYY HH:MM (e.g. 30-10-2025 19:30)"/>
+    </div>
+  </div>
+
+  <!-- ROW 2 -->
+  <div class="row-inline" style="margin-top:12px;">
+    <div style="flex:1; min-width:220px">
+      <label style="font-weight:600">Device</label>
+      <select id="select_device" class="small-input">
+        <option>-- keep current --</option>
+        <option>Mobile</option>
+        <option>Desktop</option>
+        <option>Tablet</option>
+        <option>unknown</option>
+      </select>
+    </div>
+
+    <div style="flex:1; min-width:240px; margin-left:12px">
+      <label style="font-weight:600">IP Address</label>
+      <select id="select_ip" class="small-input">
+        <option>-- keep current --</option>
+        <option>172.137.209.116</option>
+        <option>121.241.105.939</option>
+        <option>223.105.588.242</option>
+        <option>133.234.244.188</option>
+        <option>unknown</option>
+      </select>
+    </div>
+  </div>
+
+</div>
+
+        <div class="grid two">
+          <div class="card">
+            <h4>💰 Total Balance</h4>
+            <div id="total_balance" class="big">₹0.00</div>
+            <button class="ghost" id="btn_view_accounts">View Accounts</button>
+          </div>
+          <div class="card">
+            <h4>🛡️ AI Protection Status</h4>
+            <p>✓ Active<br/>Real-time monitoring enabled</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>Spend Analysis</h4>
+          <div class="grid two">
+            <div>Inflow: <span id="inflow">-</span></div>
+            <div>Outflow: <span id="outflow">-</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h4>Recent Transactions</h4>
+          <ul id="recent_transactions"></ul>
+        </div>
+      </div>
+
+      <!-- ACCOUNTS -->
+      <div id="page_accounts" class="page hidden">
+        <h2>My Accounts</h2>
+        <p>Manage your bank accounts and cards</p>
+        <div class="accounts-grid">
+          <div class="account-card card">
+            <h3>SAVINGS ACCOUNT <span id="user_short" class="pill"></span></h3>
+            <div class="big" id="savings_balance">₹0.00</div>
+            <p class="muted">All Savings Balance <span id="balance_text">₹0.00</span></p>
+            <div class="button-row">
+              <button class="small">💰 Add Funds</button>
+              <button class="small">📄 View Statement</button>
+              <button class="small" id="go_transfer">➡️ Transfer Funds</button>
+            </div>
+            <div style="margin-top:12px">
+              <div>Available to Spend: <strong id="available_spend">₹0.00</strong></div>
+              <div>Linked Fixed Deposit: ₹0.00</div>
+              <div>Cheques in Clearing: ₹0.00</div>
+            </div>
+            <button class="ghost" style="margin-top:12px">VIEW ACCOUNT DETAILS</button>
+          </div>
+
+          <div class="card-info card">
+            <div class="debit-card">
+              <div class="chip"></div>
+              <div class="card-number">************<span id="card_last4">5651</span></div>
+              <div class="card-footer">
+                <div>
+                  <div class="small muted">EXPIRES</div>
+                  <div>03/30</div>
+                </div>
+                <div>
+                  <div class="small muted">CVV</div>
+                  <div>***</div>
+                </div>
+              </div>
+            </div>
+            <div class="button-row" style="margin-top:12px">
+              <button class="small">🔒 Set Pin</button>
+              <button class="small">👁️ View CVV</button>
+            </div>
+            <div style="margin-top:12px">
+              <div>Card Age: <span id="card_age">0</span> months</div>
+              <div>Card Status: <span class="pill small">Active</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <h4>Recent Transactions</h4>
+          <ul id="recent_transactions_accounts"></ul>
+        </div>
+      </div>
+
+      <!-- TRANSFER -->
+      <div id="page_transfer" class="page hidden">
+        <h2>Payment & Transfer</h2>
+        <p>AI-powered fraud detection monitors every transaction</p>
+        <div class="card">
+          <h4>Transfer Funds</h4>
+          <input id="beneficiary" placeholder="Beneficiary Name (Enter recipient name)"/>
+          <input id="txn_id" placeholder="Transaction ID / UPI ID (Enter transaction ID or UPI ID)"/>
+          <input id="amount" placeholder="Amount (₹) (Enter amount)"/>
+          <textarea id="remarks" placeholder="Remarks (Optional) (Enter transaction remarks)"></textarea>
+          <button id="btn_initiate" class="primary">Proceed to Transfer</button>
+          <p class="muted">Requires OTP and secret key for high-value transactions.</p>
+        </div>
+
+        <div id="transfer_verify" class="card hidden">
+          <h4>Verify Transfer</h4>
+          <p>An OTP will be sent (demo). Enter the OTP and your secret key if requested.</p>
+          <input id="transfer_otp_input" placeholder="Enter OTP"/>
+          <input id="transfer_secret_input" placeholder="Enter Secret Key (if required)"/>
+          <div style="margin-top:12px">
+            <button id="btn_confirm_transfer" class="primary">Confirm Transfer</button>
+          </div>
+          <div id="transfer_result" class="muted" style="margin-top:12px"></div>
+
+          <div id="fraud_banner" class="card hidden" style="border-left:4px solid #ffdede;color:#b71c1c;margin-top:10px;">
+            <strong id="fraud_msg">⚠️ Suspicious activity detected</strong>
+            <div id="fraud_details" style="font-size:13px;margin-top:6px"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h4>Recent Transactions</h4>
+          <ul id="recent_transactions_transfer"></ul>
+        </div>
+      </div>
+
+      <!-- SERVICE -->
+      <div id="page_service" class="page hidden">
+        <h2>Customer Service</h2>
+        <div class="grid three">
+          <div class="card">
+            <h4>💬 Live Chat</h4><button class="small">Start Chat</button>
+          </div>
+          <div class="card">
+            <h4>📞 Call Us</h4><p>+91 98765 (Toll Free)</p><button class="small"> Call Now</button>
+          </div>
+          <div class="card">
+            <h4>✉️ Email Support</h4><button class="small">Send Email</button>
+          </div>
+          <div class="card">
+            <h4>❓ FAQs</h4><button class="small">Browse FAQs</button>
+          </div>
+          <div class="card">
+            <h4>🔒 Report Fraud</h4><button class="small">Report Now</button>
+          </div>
+          <div class="card">
+            <h4>💳Card Services</h4><button class="small">Manage Cards</button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

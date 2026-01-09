@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Secure Pay — Login</title>
+  <link rel="stylesheet" href="assets/css/styles.css"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SECURE PAY</div>
+    <div class="top-right">Call Us: +91 98765 | Welcome, Guest</div>
+  </header>
+
+  <main class="center-page">
+    <div class="card auth-card">
+      <h2>Welcome Back</h2>
+      <p class="muted">Sign in to access your account with AI-powered security</p>
+      <label>User ID</label>
+      <input id="login_user_id" placeholder="Enter your User ID"/>
+      <label>Password</label>
+      <input id="login_password" type="password" placeholder="Enter your Password"/>
+      <button id="btn_login" class="primary">Login</button>
+      <div class="link-row">
+        <a id="forgot_link" href="#">Forgot Password?</a>
+      </div>
+    </div>
+  </main>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="modal card">
+      <div id="forgot_step1">
+        <a id="back_to_login" class="back">&larr; Back to Login</a>
+        <h3>Reset Password</h3>
+        <p>Enter the User ID to receive an OTP to the phone number on record</p>
+        <input id="fp_user_id" placeholder="Enter your User ID"/>
+        <button id="btn_request_otp" class="primary">Send OTP</button>
+      </div>
+
+      <div id="forgot_step2" class="hidden">
+        <a id="back_to_login2" class="back">&larr; Back to Login</a>
+        <h3>Reset Password</h3>
+        <p>Enter the OTP shown in the bottom-right (demo)</p>
+        <input id="input_otp" placeholder="6-digit OTP"/>
+        <button id="btn_verify_otp" class="primary">Verify OTP</button>
+      </div>
+
+      <div id="forgot_step3" class="hidden">
+        <a id="back_to_login3" class="back">&larr; Back to Login</a>
+        <h3>Reset Password</h3>
+        <p>Create a new password</p>
+        <input id="new_password" type="password" placeholder="Enter new password"/>
+        <input id="confirm_password" type="password" placeholder="Confirm new password"/>
+        <button id="btn_reset_password" class="primary">Reset Password</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
